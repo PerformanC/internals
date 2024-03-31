@@ -22,10 +22,8 @@ function parseFrameHeader(buffer) {
     startIndex += 2
     payloadLength = buffer.readUInt16BE(2)
   } else if (payloadLength === 127) {
-    const buf = buffer.subarray(startIndex, startIndex + 8)
-
-    payloadLength = buf.readUInt32BE(0) * Math.pow(2, 32) + buf.readUInt32BE(4)
     startIndex += 8
+    payloadLength = buffer.readUIntBE(2, 6)
   }
 
   buffer = buffer.subarray(startIndex, startIndex + payloadLength)
@@ -181,6 +179,11 @@ class WebSocket extends EventEmitter {
         this.cleanup()
       })
 
+      socket.on('error', (err) => {
+        this.emit('error', err)
+        this.emit('close')
+      })
+
       this.socket = socket
 
       this.emit('open', socket, res.headers)
@@ -232,8 +235,7 @@ class WebSocket extends EventEmitter {
     if (payloadLength === 126) {
       header.writeUInt16BE(options.len, 2)
     } else if (payloadLength === 127) {
-      header[2] = header[3] = 0
-      header.writeUIntBE(options.len, 4, 6)
+      header.writeUIntBE(options.len, 2, 6)
     }
 
     if (options.mask) {
