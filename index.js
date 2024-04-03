@@ -81,6 +81,8 @@ class WebSocket extends EventEmitter {
     request.on('error', (err) => {
       this.emit('error', err)
       this.emit('close')
+
+      this.cleanup()
     })
 
     request.on('upgrade', (res, socket, head) => {
@@ -182,6 +184,8 @@ class WebSocket extends EventEmitter {
       socket.on('error', (err) => {
         this.emit('error', err)
         this.emit('close')
+
+        this.cleanup()
       })
 
       this.socket = socket
