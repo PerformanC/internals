@@ -176,14 +176,14 @@ class WebSocket extends EventEmitter {
       })
 
       socket.on('close', () => {
-        this.emit('close')
+        this.emit('close', 1006, null)
 
         this.cleanup()
       })
 
       socket.on('error', (err) => {
         this.emit('error', err)
-        this.emit('close')
+        this.emit('close', 1006, null)
 
         this.cleanup()
       })
@@ -254,9 +254,15 @@ class WebSocket extends EventEmitter {
       }
     }
 
-    this.socket.write(Buffer.concat([header, data]))
+    if (this.socket) this.socket.write(Buffer.concat([ header, data ]))
 
     return true
+  }
+
+  send(data) {
+    const payload = Buffer.from(data, 'utf-8')
+
+    return this.sendData(payload, { len: payload.length, fin: true, opcode: 0x01, mask: true })
   }
 
   close(code, reason) {

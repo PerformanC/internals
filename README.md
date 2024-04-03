@@ -1,6 +1,6 @@
-# PWSL-mini
+# PWSL
 
-A simplified version of PWSL (PerformanC's WebSocket Library)
+The PerformanC's WebSocket Library
 
 ## Features
 
@@ -15,13 +15,13 @@ A simplified version of PWSL (PerformanC's WebSocket Library)
 ## Installation
 
 ```shell
-$ npm i PerformanC/Internals#PWSL-mini
+$ npm i PerformanC/Internals#PWSL
 ```
 
 ## Usage
 
 ```js
-import PWSL from '@performanc/pwsl-mini'
+import PWSL from '@performanc/pwsl'
 
 const ws = new PWSL('ws://localhost:8080')
 
@@ -42,20 +42,20 @@ ws.on('close', () => {
 
 ## Documentation
 
-As an internal library, PWSL-mini does not have a dedicated documentation. You should refer to the source code for more information.
+As an internal library, PWSL does not have a dedicated documentation. You should refer to the source code for more information.
 
 ## Support
 
-Any question related to PWSL-mini or other PerformanC projects can be made in [PerformanC's Discord server](https://discord.gg/uPveNfTuCJ).
+Any question related to PWSL or other PerformanC projects can be made in [PerformanC's Discord server](https://discord.gg/uPveNfTuCJ).
 
 ## Contribution
 
-It is mandatory to follow the PerformanC's [contribution guidelines](https://github.com/PerformanC/contributing) to contribute to PWSL-mini. Following its Security Policy, Code of Conduct and syntax standard.
+It is mandatory to follow the PerformanC's [contribution guidelines](https://github.com/PerformanC/contributing) to contribute to PWSL. Following its Security Policy, Code of Conduct and syntax standard.
 
-## Projects using PWSL-mini
+## Projects using PWSL
 
-- [FastLink](https://github.com/PerformanC/FastLink)
+- [@performanc/voice](https://github.com/PerformanC/voice)
 
 ## License
 
-PWSL-mini is licensed under [BSD 2-Clause License](LICENSE). You can read more about it on [Open Source Initiative](https://opensource.org/licenses/BSD-2-Clause).
+PWSL is licensed under [BSD 2-Clause License](LICENSE). You can read more about it on [Open Source Initiative](https://opensource.org/licenses/BSD-2-Clause).
