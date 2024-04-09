@@ -115,7 +115,7 @@ class WebSocket extends EventEmitter {
             this.continueInfo.buffer.push(headers.buffer)
 
             if (headers.fin) {
-              this.emit('message', (this.continuedData === 1 ? this.continueInfo.buffer.join('') : Buffer.concat(this.continueInfo.buffer)))
+              this.emit('message', (this.continueInfo.type === 1 ? this.continueInfo.buffer.join('') : Buffer.concat(this.continueInfo.buffer)))
 
               this.continueInfo = {
                 type: -1,
