@@ -1,3 +1,17 @@
+function makeLog(message) {
+  return `${message}\n` + new Error().stack.replace('Error\n', '\u001b[2m') + '\u001b[0m'
+}
+
+function logFatal(message) {
+  console.error(`\n\u001b[31mError\u001b[0m: ${makeLog(message)}`)
+
+  process.exit(1)
+}
+
+function logWarning(message) {
+  console.warn(`\u001b[33mWarning\u001b[0m: ${makeLog(message)}`)
+}
+
 function verifyParams(check, params, additionalinfo = {}) {
   if (params === undefined) {
     logFatal('The parameters object is undefined.')
