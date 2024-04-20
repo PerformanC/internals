@@ -1,0 +1,9 @@
+{
+  "name": "@performanc/pctl",
+  "version": "1.0.0",
+  "description": "Runtime type checking library for JavaScript (PerformanC's Typing Library)",
+  "main": "index.js",
+  "type": "module",
+  "author": "The PerformanC Organization",
+  "license": "BSD-2-Clause"
+}
