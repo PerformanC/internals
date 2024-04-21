@@ -9,6 +9,7 @@ All the packages listed can be find in their branches inside this repository.
 - [Packages](#packages)
   - [PWSL](#pwsl)
   - [PWSL-mini](#pwsl-mini)
+  - [PCTL](#pctl)
 
 ## Packages
 
@@ -19,3 +20,7 @@ PWSL is a tight implementation of the WebSocket protocol in Node.js within a lig
 ### PWSL-mini
 
 PWSL-mini is a reduced version of the PWSL library, which is a library that provides easy access to the WebSocket protocol within a light package.
+
+### PCTL
+
+PCTL is a library that provides an easy way to verify input data given to a function, allowing runtime type checking and error handling.
