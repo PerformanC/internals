@@ -4,8 +4,16 @@ import crypto from 'node:crypto'
 import EventEmitter from 'node:events'
 import { URL } from 'node:url'
 
-function parseFrameHeaderInfo(buffer) {
+/* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+
+let nativeWs = null
+if (process.isBun) nativeWs = require('ws')
+
+function parseFrameHeader(buffer) {
   let startIndex = 2
+
   const opcode = buffer[0] & 15
   const fin = (buffer[0] & 128) === 128
   let payloadLength = buffer[1] & 127
@@ -22,33 +30,22 @@ function parseFrameHeaderInfo(buffer) {
     payloadLength = buffer.readUInt16BE(2)
   } else if (payloadLength === 127) {
     startIndex += 8
-    payloadLength = buffer.readUIntBE(4, 8)
+    payloadLength = buffer.readUIntBE(2, 6)
+  }
+
+  buffer = buffer.subarray(startIndex, startIndex + payloadLength)
+
+  if (mask) {
+    for (let i = 0; i < payloadLength; i++) {
+      buffer[i] = buffer[i] ^ mask[i & 3]
+    }
   }
 
   return {
     opcode,
     fin,
-    payloadLength,
-    mask,
-    startIndex
-  }
-}
-
-function parseFrameHeader(info, buffer) {
-  const slicedBuffer = buffer.subarray(info.startIndex, info.startIndex + info.payloadLength)
-
-  if (info.mask) {
-    for (let i = 0; i < info.payloadLength; i++) {
-      slicedBuffer[i] = slicedBuffer[i] ^ info.mask[i & 3]
-    }
-  }
-
-  return {
-    opcode: info.opcode,
-    fin: info.fin,
-    buffer: slicedBuffer,
-    payloadLength: info.payloadLength,
-    rest: buffer.subarray(info.startIndex + info.payloadLength)
+    buffer,
+    payloadLength
   }
 }
 
@@ -63,7 +60,6 @@ class WebSocket extends EventEmitter {
       type: -1,
       buffer: []
     }
-    this.state = 'WAITING'
 
     this.connect()
 
@@ -118,17 +114,83 @@ class WebSocket extends EventEmitter {
         return;
       }
 
-      socket.once('readable', () => this.checkData())
+      socket.on('data', (data) => {
+        const headers = parseFrameHeader(data)
+
+        switch (headers.opcode) {
+          case 0x0: {
+            this.continueInfo.buffer.push(headers.buffer)
+
+            if (headers.fin) {
+              this.emit('message', (this.continueInfo.type === 1 ? this.continueInfo.buffer.join('') : Buffer.concat(this.continueInfo.buffer)))
+
+              this.continueInfo = {
+                type: -1,
+                buffer: []
+              }
+            }
+
+            break
+          }
+          case 0x1: 
+          case 0x2: {
+            if (this.continueInfo.type !== -1 && this.continueInfo.type !== headers.opcode) {
+              this.close(1002, 'Invalid continuation frame')
+              this.cleanup()
+
+              return;
+            }
+
+            if (!headers.fin) {
+              this.continueInfo.type = headers.opcode
+              this.continueInfo.buffer.push(headers.buffer)
+            } else {
+              this.emit('message', headers.opcode === 0x1 ? headers.buffer.toString('utf8') : headers.buffer)
+            }
+
+            break
+          }
+          case 0x8: {
+            if (headers.buffer.length === 0) {
+              this.emit('close', 1006, '')
+            } else {
+              const code = headers.buffer.readUInt16BE(0)
+              const reason = headers.buffer.subarray(2).toString('utf-8')
+
+              this.emit('close', code, reason)
+            }
+
+            this.cleanup()
+
+            break
+          }
+          case 0x9: {
+            const pong = Buffer.allocUnsafe(2)
+            pong[0] = 0x8a
+            pong[1] = 0x00
+
+            this.socket.write(pong)
+
+            break
+          }
+          case 0xA: {
+            this.emit('pong')
+          }
+        }
+
+        if (headers.buffer.length > headers.payloadLength)
+          this.socket.unshift(headers.buffer)
+      })
 
       socket.on('close', () => {
-        this.emit('close')
+        this.emit('close', 1006, null)
 
         this.cleanup()
       })
 
       socket.on('error', (err) => {
         this.emit('error', err)
-        this.emit('close')
+        this.emit('close', 1006, null)
 
         this.cleanup()
       })
@@ -139,113 +201,6 @@ class WebSocket extends EventEmitter {
     })
 
     request.end()
-  }
-
-  async checkData() {
-    const data = this.socket.read()
-
-    if (data && this.state === 'WAITING') {
-      this.state = 'PROCESSING'
-
-      await this._processData(data)
-
-      this.state = 'WAITING'
-    }
-
-    this.socket.once('readable', () => this.checkData())
-  }
-
-  async _processData(data) {
-    const info = parseFrameHeaderInfo(data)
-    const bodyLength = Buffer.byteLength(data) - info.startIndex
-
-    if (info.payloadLength > bodyLength) {
-      const bytesLeft = info.payloadLength - bodyLength
-      
-      const nextData = await new Promise((resolve) => {
-        this.socket.once('data', (data) => {
-          if (data.length > bytesLeft) {
-            this.socket.unshift(data.subarray(bytesLeft))
-            data = data.subarray(0, bytesLeft)
-          }
-
-          resolve(data)
-        })
-      })
-
-      data = Buffer.concat([ data, nextData ])
-    }
-
-    const headers = parseFrameHeader(info, data)
-
-    switch (headers.opcode) {
-      case 0x0: {
-        this.continueInfo.buffer.push(headers.buffer)
-
-        if (headers.fin) {
-          this.emit('message', (this.continueInfo.type === 1 ? this.continueInfo.buffer.join('') : Buffer.concat(this.continueInfo.buffer)))
-
-          this.continueInfo = {
-            type: -1,
-            buffer: []
-          }
-        }
-
-        break
-      }
-      case 0x1: 
-      case 0x2: {
-        if (this.continueInfo.type !== -1 && this.continueInfo.type !== headers.opcode) {
-          this.close(1002, 'Invalid continuation frame')
-          this.cleanup()
-
-          return;
-        }
-
-        if (!headers.fin) {
-          this.continueInfo.type = headers.opcode
-          this.continueInfo.buffer.push(headers.buffer)
-        } else {
-          this.emit('message', headers.opcode === 0x1 ? headers.buffer.toString('utf8') : headers.buffer)
-        }
-
-        break
-      }
-      case 0x8: {
-        if (headers.buffer.length === 0) {
-          this.emit('close', 1006, '')
-        } else {
-          const code = headers.buffer.readUInt16BE(0)
-          const reason = headers.buffer.subarray(2).toString('utf-8')
-
-          this.emit('close', code, reason)
-        }
-
-        this.cleanup()
-
-        break
-      }
-      case 0x9: {
-        const pong = Buffer.allocUnsafe(2)
-        pong[0] = 0x8a
-        pong[1] = 0x00
-
-        this.socket.write(pong)
-
-        break
-      }
-      case 0xA: {
-        this.emit('pong')
-      }
-      default: {
-        this.close(1002, 'Invalid opcode')
-        this.cleanup()
-
-        return;
-      }
-    }
-
-    if (headers.rest.length > 0) this.socket.unshift(headers.rest)
   }
 
   cleanup() {
@@ -306,9 +261,15 @@ class WebSocket extends EventEmitter {
       }
     }
 
-    this.socket.write(Buffer.concat([header, data]))
+    if (this.socket) this.socket.write(Buffer.concat([ header, data ]))
 
     return true
+  }
+
+  send(data) {
+    const payload = Buffer.from(data, 'utf-8')
+
+    return this.sendData(payload, { len: payload.length, fin: true, opcode: 0x01, mask: true })
   }
 
   close(code, reason) {
@@ -322,4 +283,4 @@ class WebSocket extends EventEmitter {
   }
 }
 
-export default WebSocket
+export default nativeWs || WebSocket
