@@ -2,6 +2,16 @@ import EventEmitter from 'node:events'
 import crypto from 'node:crypto'
 import { Buffer } from 'node:buffer'
 
+/* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+
+let nativeWs = null
+if (process.isBun) {
+  const { WebSocketServer } = require('ws')
+  nativeWs = WebSocketServer
+}
+
 const TLS_MAX_SEND_SIZE = 2 ** 14
 const CONTINUE_HEADER_LENGTH = 2
 
@@ -254,4 +264,4 @@ class WebSocketServer extends EventEmitter {
   }
 }
 
-export default WebSocketServer
+export default nativeWs || WebSocketServer
