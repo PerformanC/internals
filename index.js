@@ -4,6 +4,13 @@ import crypto from 'node:crypto'
 import EventEmitter from 'node:events'
 import { URL } from 'node:url'
 
+/* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+
+let nativeWs = null
+if (process.isBun) nativeWs = require('ws')
+
 function parseFrameHeader(buffer) {
   let startIndex = 2
 
@@ -276,4 +283,4 @@ class WebSocket extends EventEmitter {
   }
 }
 
-export default WebSocket
+export default nativeWs || WebSocket
