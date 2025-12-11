@@ -63,6 +63,8 @@ class WebsocketConnection extends EventEmitter {
     this.req = req
     this.socket = socket
 
+    this._cachedData = []
+    
     socket.setNoDelay()
     socket.setKeepAlive(true)
 
@@ -89,12 +91,12 @@ class WebsocketConnection extends EventEmitter {
 
       switch (headers.opcode) {
         case 0x0: {
-          this.cachedData.push(headers.buffer)
+         this._cachedData.push(headers.buffer)
 
           if (headers.fin) {
-            this.emit('message', Buffer.concat(this.cachedData).toString())
+            this.emit('message', Buffer.concat(this._cachedData).toString())
 
-            this.cachedData = []
+            this._cachedData = []
           }
 
           break
@@ -126,15 +128,14 @@ class WebsocketConnection extends EventEmitter {
           break
         }
         case 0x9: {
-          const pong = Buffer.allocUnsafe(2)
-          pong[0] = 0x8a
-          pong[1] = 0x00
-
-          this.socket.write(pong)
-
+          this.sendFrame(headers.buffer, { 
+            len: headers.payloadLength, 
+            fin: true, 
+            opcode: 0xA
+          })
           break
         }
-        case 0x10: {
+        case 0xA: { 
           this.emit('pong')
         }
       }
