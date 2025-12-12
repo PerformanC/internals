@@ -91,7 +91,7 @@ class WebsocketConnection extends EventEmitter {
 
       switch (headers.opcode) {
         case 0x0: {
-         this.cachedData.push(headers.buffer)
+          this.cachedData.push(headers.buffer)
 
           if (headers.fin) {
             this.emit('message', Buffer.concat(this.cachedData).toString())
@@ -133,6 +133,7 @@ class WebsocketConnection extends EventEmitter {
             fin: true, 
             opcode: 0xA
           })
+          
           break
         }
         case 0xA: { 
