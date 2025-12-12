@@ -63,7 +63,7 @@ class WebsocketConnection extends EventEmitter {
     this.req = req
     this.socket = socket
 
-    this._cachedData = []
+    this.cachedData = []
     
     socket.setNoDelay()
     socket.setKeepAlive(true)
@@ -91,12 +91,12 @@ class WebsocketConnection extends EventEmitter {
 
       switch (headers.opcode) {
         case 0x0: {
-         this._cachedData.push(headers.buffer)
+         this.cachedData.push(headers.buffer)
 
           if (headers.fin) {
-            this.emit('message', Buffer.concat(this._cachedData).toString())
+            this.emit('message', Buffer.concat(this.cachedData).toString())
 
-            this._cachedData = []
+            this.cachedData = []
           }
 
           break
