@@ -171,34 +171,43 @@ class WebsocketConnection extends EventEmitter {
   }
 
   send(data) {
-    const payload = Buffer.from(data, 'utf-8')
+    if (!this.socket) return false
 
-    if (payload.length + CONTINUE_HEADER_LENGTH > TLS_MAX_SEND_SIZE) {
-      for (let i = 0; i < payload.length; i += TLS_MAX_SEND_SIZE) {
-        const buffer = payload.subarray(i, i + TLS_MAX_SEND_SIZE)
-        const length = Buffer.byteLength(buffer)
+    let payload = null
+    let opcode = null
 
-        let header = null
-
-        if (i === 0) {
-          header = this.makeFHeader({ len: length, fin: false, opcode: 0x1 })
-        }
-
-        else if (i + TLS_MAX_SEND_SIZE >= payload.length) {
-          header = this.makeFHeader({ len: length, fin: true, opcode: 0x0 })
-        }
-
-        else {
-          header = this.makeFHeader({ len: length, fin: false, opcode: 0x0 })
-        }
-
-        this.socket.write(Buffer.concat([ header, buffer ]))
-      }
-
-      return true
+    if (Buffer.isBuffer(data) || data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+      payload = ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : Buffer.from(data)
+      opcode = 0x2
     } else {
-      return this.sendFrame(payload, { len: payload.length, fin: true, opcode: 0x01 })
+      payload = Buffer.from(String(data))
+      opcode = 0x1
     }
+
+    const maxPayloadPerFrame = TLS_MAX_SEND_SIZE - 4
+
+    /* INFO: If it fits in one frame, send it as a single frame */
+    if (payload.length <= maxPayloadPerFrame) {
+      return this.sendFrame(payload, { len: payload.length, fin: true, opcode })
+    }
+
+    /* INFO: Otherwise, send it as fragmented frames */
+
+    /* INFO: Send the buffers immediatly */
+    this.socket.cork()
+
+    for (let offset = 0; offset < payload.length; offset += maxPayloadPerFrame) {
+      const end = Math.min(offset + maxPayloadPerFrame, payload.length)
+      const chunk = payload.subarray(offset, end)
+      const fin = end === payload.length
+      const frameOpcode = offset === 0 ? opcode : 0x0
+
+      this.sendFrame(chunk, { len: chunk.length, fin, opcode: frameOpcode })
+    }
+
+    socket.uncork()
+
+    return true
   }
 
   destroy() {
@@ -234,9 +243,10 @@ class WebsocketConnection extends EventEmitter {
   }
 
   sendFrame(data, options) {
-    const header = this.makeFHeader(options)
-    
-    if (this.socket) this.socket.write(Buffer.concat([ header, data ]))
+    if (this.socket) {
+      this.socket.write(this.makeFHeader(options))
+      this.socket.write(data)
+    }
 
     return true
   }
