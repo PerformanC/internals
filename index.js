@@ -13,46 +13,54 @@ if (process.isBun) {
 }
 
 const TLS_MAX_SEND_SIZE = 2 ** 14
-const CONTINUE_HEADER_LENGTH = 2
 
-function parseFrameHeader(buffer) {
-  let startIndex = 2
+function tryParseFrame(buffer) {
+  if (buffer.length < 2) return null
 
   const opcode = buffer[0] & 0b00001111
   const fin = (buffer[0] & 0b10000000) === 0b10000000
-  const isMasked = (buffer[1] & 0x80) === 0x80
+  const masked = (buffer[1] & 0x80) === 0x80
+
   let payloadLength = buffer[1] & 0b01111111
+  let offset = 2
 
   if (payloadLength === 126) {
-    startIndex += 2
+    if (buffer.length < 4) return null
     payloadLength = buffer.readUInt16BE(2)
+    offset = 4
   } else if (payloadLength === 127) {
-    const buf = buffer.subarray(startIndex, startIndex + 8)
-
-    payloadLength = buf.readUInt32BE(0) * Math.pow(2, 32) + buf.readUInt32BE(4)
-    startIndex += 8
+    if (buffer.length < 10) return null
+    const high = buffer.readUInt32BE(2)
+    const low = buffer.readUInt32BE(6)
+    payloadLength = high * Math.pow(2, 32) + low
+    offset = 10
   }
 
   let mask = null
+  if (masked) {
+    if (buffer.length < offset + 4) return null
+    mask = buffer.subarray(offset, offset + 4)
+    offset += 4
+  }
 
-  if (isMasked) {
-    mask = buffer.subarray(startIndex, startIndex + 4)
-    startIndex += 4
+  if (buffer.length < offset + payloadLength) return null
 
-    buffer = buffer.subarray(startIndex, startIndex + payloadLength)
-    
-    for (let i = 0; i < buffer.length; i++) {
-      buffer[i] ^= mask[i & 3]
+  let payload = buffer.subarray(offset, offset + payloadLength)
+  if (masked) {
+    const unmasked = Buffer.allocUnsafe(payloadLength)
+    for (let i = 0; i < payloadLength; i++) {
+      unmasked[i] = payload[i] ^ mask[i & 3]
     }
-  } else {
-    buffer = buffer.subarray(startIndex, startIndex + payloadLength)
+    payload = unmasked
   }
 
   return {
     opcode,
     fin,
-    buffer,
-    payloadLength
+    payload,
+    masked,
+    payloadLength,
+    consumed: offset + payloadLength
   }
 }
 
@@ -64,6 +72,8 @@ class WebsocketConnection extends EventEmitter {
     this.socket = socket
 
     this.cachedData = []
+    this.fragmentOpcode = null
+    this.recvBuffer = Buffer.alloc(0)
     
     socket.setNoDelay()
     socket.setKeepAlive(true)
@@ -87,62 +97,71 @@ class WebsocketConnection extends EventEmitter {
     socket.write(headers.join('\r\n') + '\r\n\r\n')
 
     socket.on('data', (data) => {
-      const headers = parseFrameHeader(data)
+      this.recvBuffer = this.recvBuffer.length === 0 ? data : Buffer.concat([this.recvBuffer, data])
 
-      switch (headers.opcode) {
-        case 0x0: {
-          this.cachedData.push(headers.buffer)
+      while (true) {
+        const frame = tryParseFrame(this.recvBuffer)
+        if (!frame) break
 
-          if (headers.fin) {
-            this.emit('message', Buffer.concat(this.cachedData).toString())
+        this.recvBuffer = this.recvBuffer.subarray(frame.consumed)
 
-            this.cachedData = []
+        switch (frame.opcode) {
+          case 0x0: {
+            if (this.fragmentOpcode === null) break
+
+            this.cachedData.push(frame.payload)
+
+            if (frame.fin) {
+              const messageBuffer = Buffer.concat(this.cachedData)
+              this.emit('message', this.fragmentOpcode === 0x1 ? messageBuffer.toString() : messageBuffer)
+
+              this.cachedData = []
+              this.fragmentOpcode = null
+            }
+
+            break
           }
+          case 0x1:
+          case 0x2: {
+            if (frame.fin) {
+              this.emit('message', frame.opcode === 0x1 ? frame.payload.toString() : frame.payload)
+            } else {
+              this.fragmentOpcode = frame.opcode
+              this.cachedData = [ frame.payload ]
+            }
 
-          break
-        }
-        case 0x1: {
-          this.emit('message', headers.buffer.toString())
-
-          break
-        }
-        case 0x2: {
-          this.emit('message', headers.buffer)
-
-          break
-        }
-        case 0x8: {
-          if (headers.buffer.length === 0) {
-            this.emit('close', 1006, '')
-          } else {
-            const code = headers.buffer.readUInt16BE(0)
-            const reason = headers.buffer.subarray(2).toString('utf-8')
-
-            this.emit('close', code, reason)
+            break
           }
+          case 0x8: {
+            if (frame.payload.length < 2) {
+              this.emit('close', 1005, '')
+            } else {
+              const code = frame.payload.readUInt16BE(0)
+              const reason = frame.payload.subarray(2).toString('utf-8')
+              this.emit('close', code, reason)
+            }
 
-          socket.end()
+            socket.end()
+            socket.removeAllListeners()
 
-          socket.removeAllListeners()
+            return;
+          }
+          case 0x9: {
+            this.sendFrame(frame.payload, {
+              len: frame.payload.length,
+              fin: true,
+              opcode: 0xA
+            })
 
-          break
-        }
-        case 0x9: {
-          this.sendFrame(headers.buffer, { 
-            len: headers.payloadLength, 
-            fin: true, 
-            opcode: 0xA
-          })
-          
-          break
-        }
-        case 0xA: { 
-          this.emit('pong')
+            break
+          }
+          case 0xA: {
+            this.emit('pong')
+
+            break
+          }
         }
       }
-
-      if (headers.buffer.length > headers.payloadLength)
-        this.socket.unshift(headers.buffer)
     })
 
     req.on('error', (err) => {
