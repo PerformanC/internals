@@ -107,7 +107,7 @@ class WebsocketConnection extends EventEmitter {
           break
         }
         case 0x2: {
-          throw new Error('Binary data is not supported.')
+          this.emit('message', headers.buffer)
 
           break
         }
