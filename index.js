@@ -241,12 +241,11 @@ class WebsocketConnection extends EventEmitter {
               return;
             }
 
-            let code = 1005
-            let reason = ''
-
-            if (frame.payload.length >= 2) {
-              code = frame.payload.readUInt16BE(0)
-              reason = frame.payload.subarray(2).toString('utf-8')
+            if (frame.payload.length < 2) {
+              this.emit('close', 1005, '')
+            } else {
+              const code = frame.payload.readUInt16BE(0)
+              const reason = frame.payload.subarray(2).toString('utf-8')
 
               const codeIsReserved = code === 1004 || code === 1005 || code === 1006
               const codeIsInvalidRange = (code >= 1015 && code <= 2999) || code < 1000 || code > 4999
@@ -261,9 +260,9 @@ class WebsocketConnection extends EventEmitter {
                 this.destroy()
                 return;
               }
-            }
 
-            this.emit('close', code, reason)
+              this.emit('close', code, reason)
+            }
 
             this.socket.end()
             this.socket.removeAllListeners()
@@ -431,7 +430,6 @@ class WebsocketConnection extends EventEmitter {
 
   close(code, reason) {
     let closeReason = reason || 'normal close'
-
     if (Buffer.byteLength(closeReason, 'utf8') > (125 - 2)) {
       closeReason = Buffer.from(closeReason, 'utf8').subarray(0, 125 - 2).toString('utf8')
     }
