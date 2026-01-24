@@ -28,6 +28,45 @@ function tryParseFrame(buffer) {
 
   const masked = (secondByte & 0x80) === 0x80
 
+  const isKnownOpcode =
+    opcode === 0x0 ||
+    opcode === 0x1 ||
+    opcode === 0x2 ||
+    opcode === 0x8 ||
+    opcode === 0x9 ||
+    opcode === 0xA
+
+  if (rsv1 || rsv2 || rsv3 || !isKnownOpcode) {
+    return {
+      opcode,
+      fin,
+      payload: Buffer.alloc(0),
+      masked,
+      payloadLength: 0,
+      consumed: 0,
+      rsv1,
+      rsv2,
+      rsv3,
+      invalid: true
+    }
+  }
+
+  const isControlFrame = opcode >= 0x8
+  if (isControlFrame && !fin) {
+    return {
+      opcode,
+      fin,
+      payload: Buffer.alloc(0),
+      masked,
+      payloadLength: 0,
+      consumed: 0,
+      rsv1,
+      rsv2,
+      rsv3,
+      invalid: true
+    }
+  }
+
   let payloadLength = secondByte & 0x7f
   let offset = 2
 
@@ -59,6 +98,21 @@ function tryParseFrame(buffer) {
     offset = 10
   }
 
+  if (isControlFrame && payloadLength > 125) {
+    return {
+      opcode,
+      fin,
+      payload: Buffer.alloc(0),
+      masked,
+      payloadLength: 0,
+      consumed: 0,
+      rsv1,
+      rsv2,
+      rsv3,
+      invalid: true
+    }
+  }
+
   let mask = null
   if (masked) {
     if (buffer.length < offset + 4) return null
@@ -71,8 +125,8 @@ function tryParseFrame(buffer) {
   let payload = buffer.subarray(offset, offset + payloadLength)
   if (masked) {
     const unmasked = Buffer.allocUnsafe(payloadLength)
-    for (let index = 0; index < payloadLength; index++) {
-      unmasked[index] = payload[index] ^ mask[index & 3]
+    for (let i = 0; i < payloadLength; i++) {
+      unmasked[i] = payload[i] ^ mask[i & 3]
     }
     payload = unmasked
   }
@@ -140,40 +194,20 @@ class WebsocketConnection extends EventEmitter {
         const frame = tryParseFrame(this.recvBuffer)
         if (!frame) break
 
-        this.recvBuffer = this.recvBuffer.subarray(frame.consumed)
-
         if (frame.invalid) {
           this.close(1002, 'protocol error')
           this.destroy()
-          return
+          return;
         }
 
-        if (frame.rsv1 || frame.rsv2 || frame.rsv3) {
-          this.close(1002, 'protocol error')
-          this.destroy()
-          return
-        }
-
-        const isControlFrame = frame.opcode >= 0x8
-        if (isControlFrame) {
-          if (!frame.fin) {
-            this.close(1002, 'protocol error')
-            this.destroy()
-            return
-          }
-          if (frame.payloadLength > 125) {
-            this.close(1002, 'protocol error')
-            this.destroy()
-            return
-          }
-        }
+        this.recvBuffer = this.recvBuffer.subarray(frame.consumed)
 
         switch (frame.opcode) {
           case 0x0: {
             if (this.fragmentOpcode === null) {
               this.close(1002, 'protocol error')
               this.destroy()
-              return
+              return;
             }
 
             this.cachedData.push(frame.payload)
@@ -194,14 +228,14 @@ class WebsocketConnection extends EventEmitter {
             if (this.fragmentOpcode !== null) {
               this.close(1002, 'protocol error')
               this.destroy()
-              return
+              return;
             }
 
             if (frame.fin) {
               this.emit('message', frame.opcode === 0x1 ? frame.payload.toString() : frame.payload)
             } else {
               this.fragmentOpcode = frame.opcode
-              this.cachedData = [frame.payload]
+              this.cachedData = [ frame.payload ]
             }
 
             break
@@ -211,7 +245,7 @@ class WebsocketConnection extends EventEmitter {
             if (frame.payload.length === 1) {
               this.close(1002, 'protocol error')
               this.destroy()
-              return
+              return;
             }
 
             let code = 1005
@@ -226,13 +260,13 @@ class WebsocketConnection extends EventEmitter {
               if (codeIsReserved || codeIsInvalidRange) {
                 this.close(1002, 'protocol error')
                 this.destroy()
-                return
+                return;
               }
 
               if (Buffer.byteLength(reason, 'utf8') > (125 - 2)) {
                 this.close(1002, 'protocol error')
                 this.destroy()
-                return
+                return;
               }
             }
 
@@ -243,7 +277,7 @@ class WebsocketConnection extends EventEmitter {
             this.socket = null
             this.req = null
 
-            return
+            return;
           }
 
           case 0x9: {
@@ -252,18 +286,20 @@ class WebsocketConnection extends EventEmitter {
               fin: true,
               opcode: 0xA
             })
+
             break
           }
 
           case 0xA: {
             this.emit('pong')
+
             break
           }
 
           default: {
             this.close(1002, 'protocol error')
             this.destroy()
-            return
+            return;
           }
         }
       }
@@ -272,8 +308,8 @@ class WebsocketConnection extends EventEmitter {
     req.on('error', (err) => {
       if (!this.socket) return
 
-      this.socket.destroy()
       this.emit('close', 1006, `Error: ${err.message}`)
+      this.socket.destroy()
 
       this.socket.removeAllListeners()
       this.socket = null
@@ -283,8 +319,8 @@ class WebsocketConnection extends EventEmitter {
     socket.on('error', (err) => {
       if (!this.socket) return
 
-      this.socket.destroy()
       this.emit('close', 1006, `Error: ${err.message}`)
+      this.socket.destroy()
 
       this.socket.removeAllListeners()
       this.socket = null
@@ -294,8 +330,8 @@ class WebsocketConnection extends EventEmitter {
     socket.on('end', () => {
       if (!this.socket) return
 
+      this.emit('close', 1006, null)
       this.socket.end()
-      this.emit('close', 1006, '')
 
       this.socket.removeAllListeners()
       this.socket = null
@@ -305,7 +341,7 @@ class WebsocketConnection extends EventEmitter {
     socket.on('close', () => {
       if (!this.socket) return
 
-      this.emit('close', 1006, '')
+      this.emit('close', 1006, null)
 
       this.socket.removeAllListeners()
       this.socket = null
@@ -354,8 +390,10 @@ class WebsocketConnection extends EventEmitter {
   }
 
   destroy() {
-    if (this.socket) this.socket.destroy()
-    if (this.socket) this.socket.removeAllListeners()
+    if (this.socket) {
+      this.socket.destroy()
+      this.socket.removeAllListeners()
+    }
     this.socket = null
     this.req = null
   }
@@ -398,15 +436,12 @@ class WebsocketConnection extends EventEmitter {
   }
 
   close(code, reason) {
-    const closeCode = code == null ? 1000 : Number(code)
-    const reasonText = reason == null ? 'normal close' : String(reason)
-    const reasonBuffer = Buffer.from(reasonText, 'utf8')
-    const maxReasonBytes = 125 - 2
-    const finalReasonBuffer = reasonBuffer.length > maxReasonBytes ? reasonBuffer.subarray(0, maxReasonBytes) : reasonBuffer
+    let closeReason = reason || 'normal close'
+    if (Buffer.byteLength(closeReason, 'utf8') > (125 - 2)) closeReason = 'normal close'
 
-    const data = Buffer.allocUnsafe(2 + finalReasonBuffer.length)
-    data.writeUInt16BE(closeCode, 0)
-    finalReasonBuffer.copy(data, 2)
+    const data = Buffer.allocUnsafe(2 + Buffer.byteLength(closeReason))
+    data.writeUInt16BE(code || 1000)
+    data.write(closeReason, 2)
 
     this.sendFrame(data, { len: data.length, fin: true, opcode: 0x08 })
 
