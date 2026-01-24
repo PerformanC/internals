@@ -17,11 +17,18 @@ const TLS_MAX_SEND_SIZE = 2 ** 14
 function tryParseFrame(buffer) {
   if (buffer.length < 2) return null
 
-  const opcode = buffer[0] & 0b00001111
-  const fin = (buffer[0] & 0b10000000) === 0b10000000
-  const masked = (buffer[1] & 0x80) === 0x80
+  const firstByte = buffer[0]
+  const secondByte = buffer[1]
 
-  let payloadLength = buffer[1] & 0b01111111
+  const fin = (firstByte & 0x80) === 0x80
+  const rsv1 = (firstByte & 0x40) === 0x40
+  const rsv2 = (firstByte & 0x20) === 0x20
+  const rsv3 = (firstByte & 0x10) === 0x10
+  const opcode = firstByte & 0x0f
+
+  const masked = (secondByte & 0x80) === 0x80
+
+  let payloadLength = secondByte & 0x7f
   let offset = 2
 
   if (payloadLength === 126) {
@@ -32,6 +39,22 @@ function tryParseFrame(buffer) {
     if (buffer.length < 10) return null
     const high = buffer.readUInt32BE(2)
     const low = buffer.readUInt32BE(6)
+
+    if (high & 0x80000000) {
+      return {
+        opcode,
+        fin,
+        payload: Buffer.alloc(0),
+        masked,
+        payloadLength: 0,
+        consumed: 0,
+        rsv1,
+        rsv2,
+        rsv3,
+        invalid: true
+      }
+    }
+
     payloadLength = high * Math.pow(2, 32) + low
     offset = 10
   }
@@ -48,8 +71,8 @@ function tryParseFrame(buffer) {
   let payload = buffer.subarray(offset, offset + payloadLength)
   if (masked) {
     const unmasked = Buffer.allocUnsafe(payloadLength)
-    for (let i = 0; i < payloadLength; i++) {
-      unmasked[i] = payload[i] ^ mask[i & 3]
+    for (let index = 0; index < payloadLength; index++) {
+      unmasked[index] = payload[index] ^ mask[index & 3]
     }
     payload = unmasked
   }
@@ -60,7 +83,11 @@ function tryParseFrame(buffer) {
     payload,
     masked,
     payloadLength,
-    consumed: offset + payloadLength
+    consumed: offset + payloadLength,
+    rsv1,
+    rsv2,
+    rsv3,
+    invalid: false
   }
 }
 
@@ -74,17 +101,25 @@ class WebsocketConnection extends EventEmitter {
     this.cachedData = []
     this.fragmentOpcode = null
     this.recvBuffer = Buffer.alloc(0)
-    
+
     socket.setNoDelay()
     socket.setKeepAlive(true)
 
     if (head.length !== 0) socket.unshift(head)
 
+    const wsKey = req.headers['sec-websocket-key']
+    if (!wsKey) {
+      socket.destroy()
+      this.socket = null
+      this.req = null
+      return
+    }
+
     const headers = [
       'HTTP/1.1 101 Switching Protocols',
       'Upgrade: websocket',
       'Connection: Upgrade',
-      'Sec-WebSocket-Accept: ' + crypto.createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'),
+      'Sec-WebSocket-Accept: ' + crypto.createHash('sha1').update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'),
       'Sec-WebSocket-Version: 13',
     ]
 
@@ -97,6 +132,8 @@ class WebsocketConnection extends EventEmitter {
     socket.write(headers.join('\r\n') + '\r\n\r\n')
 
     socket.on('data', (data) => {
+      if (!this.socket) return
+
       this.recvBuffer = this.recvBuffer.length === 0 ? data : Buffer.concat([this.recvBuffer, data])
 
       while (true) {
@@ -105,9 +142,39 @@ class WebsocketConnection extends EventEmitter {
 
         this.recvBuffer = this.recvBuffer.subarray(frame.consumed)
 
+        if (frame.invalid) {
+          this.close(1002, 'protocol error')
+          this.destroy()
+          return
+        }
+
+        if (frame.rsv1 || frame.rsv2 || frame.rsv3) {
+          this.close(1002, 'protocol error')
+          this.destroy()
+          return
+        }
+
+        const isControlFrame = frame.opcode >= 0x8
+        if (isControlFrame) {
+          if (!frame.fin) {
+            this.close(1002, 'protocol error')
+            this.destroy()
+            return
+          }
+          if (frame.payloadLength > 125) {
+            this.close(1002, 'protocol error')
+            this.destroy()
+            return
+          }
+        }
+
         switch (frame.opcode) {
           case 0x0: {
-            if (this.fragmentOpcode === null) break
+            if (this.fragmentOpcode === null) {
+              this.close(1002, 'protocol error')
+              this.destroy()
+              return
+            }
 
             this.cachedData.push(frame.payload)
 
@@ -121,71 +188,128 @@ class WebsocketConnection extends EventEmitter {
 
             break
           }
+
           case 0x1:
           case 0x2: {
+            if (this.fragmentOpcode !== null) {
+              this.close(1002, 'protocol error')
+              this.destroy()
+              return
+            }
+
             if (frame.fin) {
               this.emit('message', frame.opcode === 0x1 ? frame.payload.toString() : frame.payload)
             } else {
               this.fragmentOpcode = frame.opcode
-              this.cachedData = [ frame.payload ]
+              this.cachedData = [frame.payload]
             }
 
             break
           }
+
           case 0x8: {
-            if (frame.payload.length < 2) {
-              this.emit('close', 1005, '')
-            } else {
-              const code = frame.payload.readUInt16BE(0)
-              const reason = frame.payload.subarray(2).toString('utf-8')
-              this.emit('close', code, reason)
+            if (frame.payload.length === 1) {
+              this.close(1002, 'protocol error')
+              this.destroy()
+              return
             }
 
-            socket.end()
-            socket.removeAllListeners()
+            let code = 1005
+            let reason = ''
 
-            return;
+            if (frame.payload.length >= 2) {
+              code = frame.payload.readUInt16BE(0)
+              reason = frame.payload.subarray(2).toString('utf-8')
+
+              const codeIsReserved = code === 1004 || code === 1005 || code === 1006
+              const codeIsInvalidRange = (code >= 1015 && code <= 2999) || code < 1000 || code > 4999
+              if (codeIsReserved || codeIsInvalidRange) {
+                this.close(1002, 'protocol error')
+                this.destroy()
+                return
+              }
+
+              if (Buffer.byteLength(reason, 'utf8') > (125 - 2)) {
+                this.close(1002, 'protocol error')
+                this.destroy()
+                return
+              }
+            }
+
+            this.emit('close', code, reason)
+
+            this.socket.end()
+            this.socket.removeAllListeners()
+            this.socket = null
+            this.req = null
+
+            return
           }
+
           case 0x9: {
             this.sendFrame(frame.payload, {
               len: frame.payload.length,
               fin: true,
               opcode: 0xA
             })
-
             break
           }
+
           case 0xA: {
             this.emit('pong')
-
             break
+          }
+
+          default: {
+            this.close(1002, 'protocol error')
+            this.destroy()
+            return
           }
         }
       }
     })
 
     req.on('error', (err) => {
-      socket.destroy()
+      if (!this.socket) return
 
+      this.socket.destroy()
       this.emit('close', 1006, `Error: ${err.message}`)
 
-      socket.removeAllListeners()
+      this.socket.removeAllListeners()
+      this.socket = null
+      this.req = null
     })
 
     socket.on('error', (err) => {
-      socket.destroy()
+      if (!this.socket) return
 
+      this.socket.destroy()
       this.emit('close', 1006, `Error: ${err.message}`)
 
-      socket.removeAllListeners()
+      this.socket.removeAllListeners()
+      this.socket = null
+      this.req = null
     })
 
     socket.on('end', () => {
-      socket.end()
+      if (!this.socket) return
+
+      this.socket.end()
+      this.emit('close', 1006, '')
+
+      this.socket.removeAllListeners()
+      this.socket = null
+      this.req = null
+    })
+
+    socket.on('close', () => {
+      if (!this.socket) return
 
       this.emit('close', 1006, '')
 
-      socket.removeAllListeners()
+      this.socket.removeAllListeners()
+      this.socket = null
+      this.req = null
     })
   }
 
@@ -224,13 +348,14 @@ class WebsocketConnection extends EventEmitter {
       this.sendFrame(chunk, { len: chunk.length, fin, opcode: frameOpcode })
     }
 
-    socket.uncork()
+    this.socket.uncork()
 
     return true
   }
 
   destroy() {
-    this.socket.destroy()
+    if (this.socket) this.socket.destroy()
+    if (this.socket) this.socket.removeAllListeners()
     this.socket = null
     this.req = null
   }
@@ -254,8 +379,9 @@ class WebsocketConnection extends EventEmitter {
     if (payloadLength === 126) {
       header.writeUInt16BE(options.len, 2)
     } else if (payloadLength === 127) {
-      header[2] = header[3] = 0
-      header.writeUIntBE(options.len, 4, 6)
+      const bigLength = BigInt(options.len)
+      header.writeUInt32BE(Number((bigLength >> 32n) & 0xffffffffn), 2)
+      header.writeUInt32BE(Number(bigLength & 0xffffffffn), 6)
     }
 
     return header
@@ -265,15 +391,22 @@ class WebsocketConnection extends EventEmitter {
     if (this.socket) {
       this.socket.write(this.makeFHeader(options))
       this.socket.write(data)
+      return true
     }
 
-    return true
+    return false
   }
 
   close(code, reason) {
-    const data = Buffer.allocUnsafe(2 + Buffer.byteLength(reason || 'normal close'))
-    data.writeUInt16BE(code || 1000)
-    data.write(reason || 'normal close', 2)
+    const closeCode = code == null ? 1000 : Number(code)
+    const reasonText = reason == null ? 'normal close' : String(reason)
+    const reasonBuffer = Buffer.from(reasonText, 'utf8')
+    const maxReasonBytes = 125 - 2
+    const finalReasonBuffer = reasonBuffer.length > maxReasonBytes ? reasonBuffer.subarray(0, maxReasonBytes) : reasonBuffer
+
+    const data = Buffer.allocUnsafe(2 + finalReasonBuffer.length)
+    data.writeUInt16BE(closeCode, 0)
+    finalReasonBuffer.copy(data, 2)
 
     this.sendFrame(data, { len: data.length, fin: true, opcode: 0x08 })
 
@@ -287,6 +420,8 @@ class WebSocketServer extends EventEmitter {
   }
 
   handleUpgrade(req, socket, head, headers, callback) {
+    if (!socket.readable || !socket.writable) return socket.destroy()
+
     const connection = new WebsocketConnection(req, socket, head, headers)
 
     if (!socket.readable || !socket.writable) return socket.destroy()
