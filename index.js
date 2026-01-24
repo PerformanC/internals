@@ -227,8 +227,10 @@ class WebsocketConnection extends EventEmitter {
           case 0x2: {
             if (this.fragmentOpcode !== null) {
               this.close(1002, 'protocol error')
+
               this.destroy()
-              return;
+
+              return
             }
 
             if (frame.fin) {
