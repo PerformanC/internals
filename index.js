@@ -36,6 +36,8 @@ function tryParseFrame(buffer) {
     opcode === 0x9 ||
     opcode === 0xA
 
+  const isControlFrame = opcode >= 0x8
+
   if (rsv1 || rsv2 || rsv3 || !isKnownOpcode) {
     return {
       opcode,
@@ -44,14 +46,10 @@ function tryParseFrame(buffer) {
       masked,
       payloadLength: 0,
       consumed: 0,
-      rsv1,
-      rsv2,
-      rsv3,
       invalid: true
     }
   }
 
-  const isControlFrame = opcode >= 0x8
   if (isControlFrame && !fin) {
     return {
       opcode,
@@ -60,9 +58,6 @@ function tryParseFrame(buffer) {
       masked,
       payloadLength: 0,
       consumed: 0,
-      rsv1,
-      rsv2,
-      rsv3,
       invalid: true
     }
   }
@@ -87,9 +82,6 @@ function tryParseFrame(buffer) {
         masked,
         payloadLength: 0,
         consumed: 0,
-        rsv1,
-        rsv2,
-        rsv3,
         invalid: true
       }
     }
@@ -106,30 +98,34 @@ function tryParseFrame(buffer) {
       masked,
       payloadLength: 0,
       consumed: 0,
-      rsv1,
-      rsv2,
-      rsv3,
       invalid: true
     }
   }
 
-  let mask = null
-  if (masked) {
-    if (buffer.length < offset + 4) return null
-    mask = buffer.subarray(offset, offset + 4)
-    offset += 4
+  if (!masked) {
+    return {
+      opcode,
+      fin,
+      payload: Buffer.alloc(0),
+      masked,
+      payloadLength: 0,
+      consumed: 0,
+      invalid: true
+    }
   }
+
+  if (buffer.length < offset + 4) return null
+  const mask = buffer.subarray(offset, offset + 4)
+  offset += 4
 
   if (buffer.length < offset + payloadLength) return null
 
   let payload = buffer.subarray(offset, offset + payloadLength)
-  if (masked) {
-    const unmasked = Buffer.allocUnsafe(payloadLength)
-    for (let i = 0; i < payloadLength; i++) {
-      unmasked[i] = payload[i] ^ mask[i & 3]
-    }
-    payload = unmasked
+  const unmasked = Buffer.allocUnsafe(payloadLength)
+  for (let i = 0; i < payloadLength; i++) {
+    unmasked[i] = payload[i] ^ mask[i & 3]
   }
+  payload = unmasked
 
   return {
     opcode,
@@ -138,9 +134,6 @@ function tryParseFrame(buffer) {
     masked,
     payloadLength,
     consumed: offset + payloadLength,
-    rsv1,
-    rsv2,
-    rsv3,
     invalid: false
   }
 }
@@ -174,7 +167,7 @@ class WebsocketConnection extends EventEmitter {
       'Upgrade: websocket',
       'Connection: Upgrade',
       'Sec-WebSocket-Accept: ' + crypto.createHash('sha1').update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64'),
-      'Sec-WebSocket-Version: 13',
+      'Sec-WebSocket-Version: 13'
     ]
 
     if (addHeaders) {
@@ -227,9 +220,7 @@ class WebsocketConnection extends EventEmitter {
           case 0x2: {
             if (this.fragmentOpcode !== null) {
               this.close(1002, 'protocol error')
-
               this.destroy()
-
               return
             }
 
@@ -440,7 +431,10 @@ class WebsocketConnection extends EventEmitter {
 
   close(code, reason) {
     let closeReason = reason || 'normal close'
-    if (Buffer.byteLength(closeReason, 'utf8') > (125 - 2)) closeReason = 'normal close'
+
+    if (Buffer.byteLength(closeReason, 'utf8') > (125 - 2)) {
+      closeReason = Buffer.from(closeReason, 'utf8').subarray(0, 125 - 2).toString('utf8')
+    }
 
     const data = Buffer.allocUnsafe(2 + Buffer.byteLength(closeReason))
     data.writeUInt16BE(code || 1000)
