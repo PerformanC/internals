@@ -429,6 +429,7 @@ class WebsocketConnection extends EventEmitter {
     if (this.socket) {
       this.socket.write(this.makeFHeader(options))
       this.socket.write(data)
+
       return true
     }
 
