@@ -4,11 +4,9 @@ import { Buffer } from 'node:buffer'
 
 /* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
 import { createRequire } from 'node:module'
-
 const require = createRequire(import.meta.url)
 
 let nativeWs = null
-
 if (process.isBun) {
   const { WebSocketServer } = require('ws')
   nativeWs = WebSocketServer
@@ -280,10 +278,15 @@ class WebsocketConnection extends EventEmitter {
               this.emit('close', code, reason)
             }
 
-            this.socket.end()
-            this.socket.removeAllListeners()
+            const activeSocket = this.socket
+
+            if (!activeSocket) return;
+
             this.socket = null
             this.req = null
+
+            activeSocket.end()
+            activeSocket.removeAllListeners()
 
             return;
           }
@@ -319,33 +322,48 @@ class WebsocketConnection extends EventEmitter {
       if (!this.socket) return;
 
       this.emit('close', 1006, `Error: ${err.message}`)
-      this.socket.destroy()
 
-      this.socket.removeAllListeners()
+      const activeSocket = this.socket
+
+      if (!activeSocket) return;
+
       this.socket = null
       this.req = null
+
+      activeSocket.destroy()
+      activeSocket.removeAllListeners()
     })
 
     socket.on('error', (err) => {
       if (!this.socket) return;
 
       this.emit('close', 1006, `Error: ${err.message}`)
-      this.socket.destroy()
 
-      this.socket.removeAllListeners()
+      const activeSocket = this.socket
+
+      if (!activeSocket) return;
+
       this.socket = null
       this.req = null
+
+      activeSocket.destroy()
+      activeSocket.removeAllListeners()
     })
 
     socket.on('end', () => {
       if (!this.socket) return;
 
       this.emit('close', 1006, null)
-      this.socket.end()
 
-      this.socket.removeAllListeners()
+      const activeSocket = this.socket
+
+      if (!activeSocket) return;
+
       this.socket = null
       this.req = null
+
+      activeSocket.end()
+      activeSocket.removeAllListeners()
     })
 
     socket.on('close', () => {
@@ -353,9 +371,14 @@ class WebsocketConnection extends EventEmitter {
 
       this.emit('close', 1006, null)
 
-      this.socket.removeAllListeners()
+      const activeSocket = this.socket
+
+      if (!activeSocket) return;
+
       this.socket = null
       this.req = null
+
+      activeSocket.removeAllListeners()
     })
   }
 
@@ -402,16 +425,22 @@ class WebsocketConnection extends EventEmitter {
       })
     }
 
-    this.socket.uncork()
+    if (this.socket) this.socket.uncork()
 
     return true
   }
 
   destroy() {
     if (this.socket) {
-      this.socket.destroy()
-      this.socket.removeAllListeners()
+      const activeSocket = this.socket
+
       this.socket = null
+      this.req = null
+
+      activeSocket.destroy()
+      activeSocket.removeAllListeners()
+
+      return;
     }
 
     this.req = null
