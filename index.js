@@ -267,6 +267,8 @@ class WebSocket extends EventEmitter {
   }
 
   sendData(data, options) {
+    if (!this.socket) return false
+    
     let payloadStartIndex = 2
     let payloadLength = options.len
     let mask = null
