@@ -3,13 +3,11 @@ import http from 'node:http'
 import crypto from 'node:crypto'
 import EventEmitter from 'node:events'
 import { URL } from 'node:url'
+import BunWebSocket from './bun-support.js'
 
 /* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
-import { createRequire } from 'node:module'
-const require = createRequire(import.meta.url)
-
 let nativeWs = null
-if (process.isBun) nativeWs = require('ws')
+if (process.versions.bun) nativeWs = BunWebSocket
 
 function tryParseFrame(buffer) {
   if (buffer.length < 2) return null
