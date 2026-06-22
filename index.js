@@ -244,6 +244,12 @@ class WebSocket extends EventEmitter {
         this.cleanup()
       })
 
+      socket.on('end', () => {
+        if (!this.socket || this.socket.destroyed) return;
+
+        socket.destroy()
+      })
+
       this.emit('open', socket, res.headers)
     })
 
