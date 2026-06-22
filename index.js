@@ -142,27 +142,36 @@ class WebSocket extends EventEmitter {
 
           /* INFO: Per the RFC, frames from server MUST NOT be masked */
           if (frame.masked) {
+            this.emit('error', new Error('Masked frame from server'))
+            this.emit('close', 1002, null)
             this.close(1002, 'Masked frame from server')
+
             this.cleanup()
 
-            return
+            return;
           }
 
           const isControl = frame.opcode >= 0x8
           if (isControl && (!frame.fin || frame.payloadLength > 125)) {
+            this.emit('error', new Error('Invalid control frame'))
+            this.emit('close', 1002, null)
             this.close(1002, 'Invalid control frame')
+
             this.cleanup()
 
-            return
+            return;
           }
 
           switch (frame.opcode) {
             case 0x0: {
               if (this.continueInfo.type === -1) {
+                this.emit('error', new Error('Unexpected continuation frame'))
+                this.emit('close', 1002, null)
                 this.close(1002, 'Unexpected continuation frame')
+
                 this.cleanup()
 
-                return
+                return;
               }
 
               this.continueInfo.buffer.push(frame.payload)
@@ -182,10 +191,13 @@ class WebSocket extends EventEmitter {
             case 0x1:
             case 0x2: {
               if (this.continueInfo.type !== -1) {
-                this.close(1002, 'Interleaved data frames')
+                this.emit('error', new Error('Interleaved data frames'))
+                this.emit('close', 1002, null)
+                this.close(1002, null)
+
                 this.cleanup()
 
-                return
+                return;
               }
 
               if (!frame.fin) {
@@ -199,9 +211,13 @@ class WebSocket extends EventEmitter {
             }
             case 0x8: {
               if (frame.payload.length === 1) {
+                this.emit('error', new Error('Invalid close frame'))
+                this.emit('close', 1002, null)
                 this.close(1002, 'Invalid close frame')
+
                 this.cleanup()
-                return
+
+                return;
               }
 
               if (frame.payload.length < 2) {
