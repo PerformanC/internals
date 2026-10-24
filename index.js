@@ -113,6 +113,11 @@ class WebSocket extends EventEmitter {
     })
 
     request.on('upgrade', (res, socket, head) => {
+      if (this.request !== request) {
+        socket.destroy()
+        return;
+      }
+
       socket.setNoDelay()
       socket.setKeepAlive(true)
 
