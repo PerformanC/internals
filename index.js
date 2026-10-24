@@ -70,6 +70,7 @@ class WebSocket extends EventEmitter {
     this.url = url
     this.options = options
     this.socket = null
+    this.request = null
     this.recvBuffer = Buffer.alloc(0)
     this.continueInfo = {
       type: -1,
@@ -100,7 +101,11 @@ class WebSocket extends EventEmitter {
       method: 'GET'
     })
 
+    this.request = request
+
     request.on('error', (err) => {
+      if (this.request !== request) return;
+
       this.emit('error', err)
       this.emit('close', 1006, null)
 
@@ -129,6 +134,7 @@ class WebSocket extends EventEmitter {
         return;
       }
 
+      this.request = null
       this.socket = socket
 
       socket.on('data', (data) => {
@@ -273,6 +279,10 @@ class WebSocket extends EventEmitter {
   }
 
   cleanup() {
+    const request = this.request
+    this.request = null
+    request?.destroy()
+
     if (this.socket) {
       this.socket.destroy()
       this.socket = null
@@ -361,6 +371,12 @@ class WebSocket extends EventEmitter {
   }
 
   close(code, reason) {
+    if (this.request) {
+      this.cleanup()
+      this.emit('close', 1006, null)
+      return true
+    }
+
     const data = Buffer.allocUnsafe(2 + Buffer.byteLength(reason ?? 'normal close'))
     data.writeUInt16BE(code ?? 1000)
     data.write(reason ?? 'normal close', 2)
