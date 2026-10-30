@@ -115,6 +115,7 @@ class WebSocket extends EventEmitter {
     request.on('upgrade', (res, socket, head) => {
       if (this.request !== request) {
         socket.destroy()
+
         return;
       }
 
@@ -285,6 +286,7 @@ class WebSocket extends EventEmitter {
 
   cleanup() {
     const request = this.request
+    /* INFO: Invalidate the request before destroying it to prevent stale callbacks from handling it. */
     this.request = null
     request?.destroy()
 
@@ -379,6 +381,7 @@ class WebSocket extends EventEmitter {
     if (this.request) {
       this.cleanup()
       this.emit('close', 1006, null)
+
       return true
     }
 
