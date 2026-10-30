@@ -5,7 +5,7 @@ import EventEmitter from 'node:events'
 import { URL } from 'node:url'
 import BunWebSocket from './bun-support.js'
 
-/* Bun is problematic with PWSLs due leak of full implementation of TLS/NET modules */
+/* INFO: Prefer Bun WebSocket implementation over PWSL's for performance reasons */
 let nativeWs = null
 if (process.versions.bun) nativeWs = BunWebSocket
 
