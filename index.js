@@ -380,7 +380,7 @@ class WebSocket extends EventEmitter {
   close(code, reason) {
     if (this.request) {
       this.cleanup()
-      this.emit('close', 1006, null)
+      process.nextTick(() => this.emit('close', 1006, null))
 
       return true
     }
