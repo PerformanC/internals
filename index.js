@@ -257,6 +257,8 @@ class WebSocket extends EventEmitter {
       })
 
       socket.on('close', () => {
+        if (this.socket !== socket) return;
+
         this.emit('close', 1006, null)
 
         this.cleanup()
