@@ -13,6 +13,7 @@ function tryParseFrame(buffer) {
   if (buffer.length < 2) return null
 
   const opcode = buffer[0] & 0x0f
+  const rsv = buffer[0] & 0x70
   const fin = (buffer[0] & 0x80) === 0x80
   const masked = (buffer[1] & 0x80) === 0x80
 
@@ -52,6 +53,7 @@ function tryParseFrame(buffer) {
 
   return {
     opcode,
+    rsv,
     fin,
     masked,
     payload,
@@ -187,6 +189,16 @@ class WebSocket extends EventEmitter {
             this.emit('error', new Error('Invalid control frame'))
             this.emit('close', 1002, null)
             this.close(1002, 'Invalid control frame')
+
+            this.cleanup()
+
+            return;
+          }
+
+          if (frame.rsv !== 0) {
+            this.emit('error', new Error('Unsupported extension (RSV bits set)'))
+            this.emit('close', 1002, null)
+            this.close(1002, 'Unsupported extension')
 
             this.cleanup()
 
