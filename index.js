@@ -109,6 +109,16 @@ class WebSocket extends EventEmitter {
       this.cleanup()
     })
 
+    request.on('timeout', () => {
+      if (this.request !== request) return;
+
+      this.request = null
+      request.destroy()
+
+      this.emit('error', new Error('Connection timed out'))
+      this.emit('close', 1006, null)
+    })
+
     /* INFO: A regular HTTP response means the server refused the upgrade */
     request.on('response', (res) => {
       if (this.request !== request) return;
