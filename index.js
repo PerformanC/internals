@@ -426,9 +426,7 @@ class WebSocket extends EventEmitter {
     data.writeUInt16BE(code ?? 1000)
     data.write(reason ?? 'normal close', 2)
 
-    this.sendData(data, { len: data.length, fin: true, opcode: 0x8, mask: true })
-
-    return true
+    return this.sendData(data, { len: data.length, fin: true, opcode: 0x8, mask: true })
   }
 }
 
