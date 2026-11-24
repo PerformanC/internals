@@ -268,6 +268,7 @@ class WebSocket extends EventEmitter {
               return
             }
             case 0x9: {
+              /* INFO: RFC 6455 (§5.5.3) requires that clients pass back the payload of a ping frame in the pong frame. */
               this.sendData(frame.payload, { len: frame.payload.length, fin: true, opcode: 0xA, mask: true })
 
               break
