@@ -274,6 +274,17 @@ class WebSocket extends EventEmitter {
 
               break
             }
+            default: {
+              /* INFO: RFC 6455 reserves opcodes 0x3-0x7 and 0xB-0xF. Frames using
+                         them must kill the connection. */
+              this.emit('error', new Error(`Unexpected opcode: 0x${frame.opcode.toString(16)}`))
+              this.emit('close', 1002, null)
+              this.close(1002, 'Unexpected opcode')
+
+              this.cleanup()
+
+              return;
+            }
           }
         }
       })
