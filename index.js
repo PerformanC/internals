@@ -145,18 +145,15 @@ class WebSocket extends EventEmitter {
 
       if (head.length !== 0) socket.unshift(head)
 
-      if (res.headers.upgrade.toLowerCase() !== 'websocket') {
-        socket.destroy()
-
-        return;
-      }
-
       const digest = crypto.createHash('sha1')
         .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
         .digest('base64')
 
-      if (res.headers['sec-websocket-accept'] !== digest) {
+      if ((res.headers.upgrade || '').toLowerCase() !== 'websocket' || res.headers['sec-websocket-accept'] !== digest) {
         socket.destroy()
+
+        this.emit('error', new Error('Invalid WebSocket handshake'))
+        this.emit('close', 1002, null)
 
         return;
       }
