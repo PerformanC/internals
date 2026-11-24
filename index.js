@@ -109,6 +109,18 @@ class WebSocket extends EventEmitter {
       this.cleanup()
     })
 
+    /* INFO: A regular HTTP response means the server refused the upgrade */
+    request.on('response', (res) => {
+      if (this.request !== request) return;
+
+      this.request = null
+      res.resume()
+      request.destroy()
+
+      this.emit('error', new Error(`Unexpected HTTP response: ${res.statusCode}`))
+      this.emit('close', 1002, null)
+    })
+
     request.on('upgrade', (res, socket, head) => {
       if (this.request !== request) {
         socket.destroy()
