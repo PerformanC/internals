@@ -26,10 +26,7 @@ function tryParseFrame(buffer) {
     offset = 4
   } else if (payloadLength === 127) {
     if (buffer.length < 10) return null
-    const high = buffer.readUInt32BE(2)
-    const low = buffer.readUInt32BE(6)
-
-    payloadLength = high * Math.pow(2, 32) + low
+    payloadLength = Number(buffer.readBigUInt64BE(2))
     offset = 10
   }
 
