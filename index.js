@@ -251,6 +251,9 @@ class WebSocket extends EventEmitter {
                 return;
               }
 
+              /* INFO: RFC 6455 (§5.5.1) says client must send close back as ACK for close opcode */
+              this.sendData(frame.payload, { len: frame.payload.length, fin: true, opcode: 0x8, mask: true })
+
               if (frame.payload.length < 2) {
                 this.emit('close', 1005, '')
               } else {
