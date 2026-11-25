@@ -150,6 +150,7 @@ class WebSocket extends EventEmitter {
         .digest('base64')
 
       if ((res.headers.upgrade || '').toLowerCase() !== 'websocket' || res.headers['sec-websocket-accept'] !== digest) {
+        this.request = null
         socket.destroy()
 
         this.emit('error', new Error('Invalid WebSocket handshake'))
