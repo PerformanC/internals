@@ -351,59 +351,32 @@ class WebSocket extends EventEmitter {
 
   sendData(data, options) {
     if (!this.socket) return false
-    
-    let payloadStartIndex = 2
-    let payloadLength = options.len
-    let mask = null
+
+    /* INFO: Length encoding: 7 bits, 16 bits, or 64 bits */
+    const extended = options.len >= 65536 ? 8 : options.len > 125 ? 2 : 0
+    const headerLength = 2 + extended + (options.mask ? 4 : 0)
+
+    const frame = Buffer.allocUnsafe(headerLength + options.len)
+    frame[0] = options.fin ? options.opcode | 128 : options.opcode
+    frame[1] = (options.mask ? 128 : 0) | (extended === 8 ? 127 : extended === 2 ? 126 : options.len)
+
+    if (extended === 2) {
+      frame.writeUInt16BE(options.len, 2)
+    } else if (extended === 8) {
+      frame.writeBigUInt64BE(BigInt(options.len), 2)
+    }
 
     if (options.mask) {
-      mask = Buffer.allocUnsafe(4)
+      crypto.randomFillSync(frame, headerLength - 4, 4)
 
-      while ((mask[0] | mask[1] | mask[2] | mask[3]) === 0)
-        crypto.randomFillSync(mask, 0, 4)
-
-      payloadStartIndex += 4
-    }
-
-    if (options.len >= 65536) {
-      payloadStartIndex += 8
-      payloadLength = 127
-    } else if (options.len > 125) {
-      payloadStartIndex += 2
-      payloadLength = 126
-    }
-
-    const header = Buffer.allocUnsafe(payloadStartIndex)
-    header[0] = options.fin ? options.opcode | 128 : options.opcode
-    header[1] = payloadLength
-
-    if (payloadLength === 126) {
-      header.writeUInt16BE(options.len, 2)
-    } else if (payloadLength === 127) {
-      header.writeBigUInt64BE(BigInt(options.len), 2)
-    }
-
-    let payloadToWrite = data
-
-    if (options.mask) {
-      header[1] |= 128
-      header[payloadStartIndex - 4] = mask[0]
-      header[payloadStartIndex - 3] = mask[1]
-      header[payloadStartIndex - 2] = mask[2]
-      header[payloadStartIndex - 1] = mask[3]
-
-      const maskedPayload = Buffer.allocUnsafe(options.len)
       for (let i = 0; i < options.len; i++) {
-        maskedPayload[i] = data[i] ^ mask[i & 3]
+        frame[headerLength + i] = data[i] ^ frame[headerLength - 4 + (i & 3)]
       }
-
-      payloadToWrite = maskedPayload
+    } else {
+      data.copy(frame, headerLength)
     }
 
-    this.socket.write(header)
-    this.socket.write(payloadToWrite)
-
-    return true
+    return this.socket.write(frame)
   }
 
   send(data) {
