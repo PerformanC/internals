@@ -87,8 +87,10 @@ class WebSocket extends EventEmitter {
     const agent = isSecure ? https : http
     const key = crypto.randomBytes(16).toString('base64')
 
-    const request = agent.request((isSecure ? 'https://' : 'http://') + parsedUrl.hostname + parsedUrl.pathname + parsedUrl.search, {
-      port: parsedUrl.port || (isSecure ? 443 : 80),
+    /* INFO: Strip credentials, if any, then turn the ws(s) URL into an http(s) one */
+    parsedUrl.username = parsedUrl.password = ''
+
+    const request = agent.request(parsedUrl.href.replace(/^ws/, 'http'), {
       timeout: this.options?.timeout ?? 0,
       headers: {
         'Sec-WebSocket-Key': key,
