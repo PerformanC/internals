@@ -382,15 +382,19 @@ class WebSocket extends EventEmitter {
   send(data) {
     if (!this.socket) return false
 
-    let payload = null
-    let opcode = null
+    let opcode = 0x1
+    let payload
 
-    if (Buffer.isBuffer(data) || data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+    if (typeof data === 'string') {
+      payload = Buffer.from(data)
+    } else if (Buffer.isBuffer(data)) {
+      payload = data
+      opcode = 0x2
+    } else if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
       payload = ArrayBuffer.isView(data) ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : Buffer.from(data)
       opcode = 0x2
     } else {
       payload = Buffer.from(String(data))
-      opcode = 0x1
     }
 
     return this.sendData(payload, { len: payload.length, fin: true, opcode, mask: true })
