@@ -77,8 +77,6 @@ class WebSocket extends EventEmitter {
     }
 
     this.connect()
-
-    return this
   }
 
   connect() {
